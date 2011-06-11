@@ -185,10 +185,26 @@ static int get_best_under(const char *path, int mode) {
 	return j;
 }
 
+static char creatpath[PATH_MAX] = "";
+static int creatfd = -1;
+static int creatunder = -1;
+
 static int sgfs_mknod(const char *path, mode_t mode, dev_t rdev) {
 	int res = get_best_under(path, mode);
 	if(res < 0)
 		return res;
+	if(S_ISREG(mode)) {
+		int fd = openat(under_fd[res], path + 1, O_RDWR | O_CREAT | O_EXCL, mode & 007777);
+		if(fd < 0)
+			return -errno;
+		if(creatfd >= 0)
+			close(creatfd);
+		creatfd = fd;
+		creatunder = res;
+		strncpy(creatpath, path, sizeof creatpath);
+		return 0;
+	}
+
 	res = mknodat(under_fd[res], path + 1, mode, rdev);
 	return res ? -errno : 0;
 }
@@ -389,6 +405,19 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 	int res = -1;
 	errno = ENOENT;
 
+	if(creatfd >= 0 && !strcmp(creatpath, path)) {
+		struct sgfs_file *f = malloc(sizeof *f);
+		f->under = creatunder;
+		f->rfd = creatfd;
+		f->wfd = creatfd;
+		fi->fh = f;
+		creatfd = -1;
+		return 0;
+	} else if(creatfd >= 0) {
+		close(creatfd);
+		creatfd = -1;
+	}
+
 	for(i = 0; i < unders; i++) {
 		res = openat(under_fd[i], path[1] ? path + 1 : ".", O_RDONLY);
 		if(res >= 0 || errno != ENOENT)
@@ -433,7 +462,7 @@ static int sgfs_write(const char *path, const char *buf, size_t size, off_t offs
 
 static int sgfs_release(const char *path, struct fuse_file_info *fi) {
 	struct sgfs_file *f = fi->fh;
-	if(f->wfd)
+	if(f->wfd && f->wfd != f->rfd)
 		close(f->wfd);
 	return close(f->rfd);
 }
