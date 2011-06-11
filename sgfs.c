@@ -1,6 +1,7 @@
 #define FUSE_USE_VERSION 26
 
 #include <fuse.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -29,6 +30,44 @@ struct sgfs_file {
 	int wfd;
 	int under;
 };
+
+static uint32_t crc_table[256];
+
+static void make_crc_table(void) {
+	unsigned long c;
+	int n, k;
+
+	for (n = 0; n < 256; n++) {
+		c = (unsigned long) n;
+		for (k = 0; k < 8; k++) {
+			if (c & 1)
+				c = 0xedb88320L ^ (c >> 1);
+			else
+				c = c >> 1;
+			crc_table[n] = c;
+		}
+	}
+}
+
+static uint32_t update_crc(uint32_t crc, const unsigned char *buf, int len) {
+	static bool crc_table_computed = false;
+
+	if (!crc_table_computed) {
+		make_crc_table();
+		crc_table_computed = true;
+	}
+
+	crc ^= 0xffffffffL;
+
+	for (int n = 0; n < len; n++)
+		crc = crc_table[(crc ^ buf[n]) & 0xff] ^ (crc >> 8);
+
+	return crc ^ 0xffffffffL;
+}
+
+static uint32_t crc(const char *buf, int len) {
+	return update_crc(0L, (const unsigned char *)buf, len);
+}
 
 static int sgfs_statfs(const char *path, struct statvfs *stbuf) {
 	fprintf(stderr, "statfs(%s)\n", path);
@@ -430,11 +469,10 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 
 	if(offset) {
 		fprintf(stderr, "Cannot handle offsets!\n");
-		return 0;
+		return -EINVAL;
 	}
 
-	bool dot = false;
-	bool dotdot = false;
+	char hbm[8192] = ""; // 64k entry hash bitmap for duplicate detection
 
 	for(int i = 0; i < unders; i++) {
 		if(fchdir(under_fd[i])) {
@@ -458,18 +496,32 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 
 		while((ent = readdir(dir))) {
 			fprintf(stderr, "%s\n", ent->d_name);
-			if(!strcmp(ent->d_name, ".")) {
-				if(dot)
-					continue;
-				else
-					dot = true;
-			}
 
-			if(!strcmp(ent->d_name, "..")) {
-				if(dotdot)
-					continue;
-				else
-					dotdot = true;
+			// Do duplicate detection for directories
+			if(ent->d_type == DT_UNKNOWN || ent->d_type == DT_DIR) {
+				uint16_t hash = crc(ent->d_name, strlen(ent->d_name));
+				uint8_t mask = 1 << (hash & 0x7);
+				hash >>= 3;
+				if(hbm[hash] & mask) {
+					bool found = false;
+					for(int j = 0; j < i; j++) {
+						char entpath[PATH_MAX];
+						strncpy(entpath, path[1] ? path + 1 : ".", sizeof entpath - 1);
+						strncat(entpath, "/", sizeof entpath - 1);
+						strncat(entpath, ent->d_name, sizeof entpath - 1);
+						entpath[PATH_MAX - 1] = 0;
+						if(!faccessat(under_fd[i], entpath, F_OK, AT_SYMLINK_NOFOLLOW)) {
+							found = true;
+							break;
+						}
+					}
+					if(found) {
+						fprintf(stderr, "Found duplicate %s in %s\n", ent->d_name, path);
+						continue;
+					}
+				} else {
+					hbm[hash] |= mask;
+				}
 			}
 
 			struct stat st;
@@ -477,7 +529,7 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 			st.st_ino = ent->d_ino;
 			st.st_mode = ent->d_type << 12;
 
-			if(filler(buf, ent->d_name, &st, telldir(dir)))
+			if(filler(buf, ent->d_name, &st, 0))
 				break;
 		}
 
