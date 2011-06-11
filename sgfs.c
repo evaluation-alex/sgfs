@@ -90,11 +90,6 @@ static int get_best_under(const char *path, int mode) {
 	struct stat stdir;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
 		if(fstatvfs(under_fd[i], &st)) {
 			fprintf(stderr, "fstatvfs(%s) failed: %s\n", under_name[i], strerror(errno));
 			continue;
@@ -102,7 +97,7 @@ static int get_best_under(const char *path, int mode) {
 
 		ffree[i] = (uint64_t)st.f_bsize * st.f_bfree;
 
-		int res = stat(basename, &stdir);
+		int res = fstatat(under_fd[i], basename, &stdir, AT_SYMLINK_NOFOLLOW);
 		if(!res && S_ISDIR(stdir.st_mode)) {
 			hasdir[i] = true;
 			if(!dirmode)
@@ -119,9 +114,6 @@ static int get_best_under(const char *path, int mode) {
 		if(ffree[i] < MINFREE)
 			continue;
 
-		if(fchdir(under_fd[i]))
-			continue;
-
 		return i;
 	}
 
@@ -135,15 +127,10 @@ static int get_best_under(const char *path, int mode) {
 		}
 	}
 
-	if(fchdir(under_fd[j])) {
-		fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[j], strerror(errno));
-		return -EIO;
-	}
-
 	if(!hasdir[j]) {
 		if(!dirmode)
 			dirmode = S_IRWXU;
-		int res = mkdir(basename, mode);
+		int res = mkdirat(under_fd[j], basename, mode);
 		if(res)
 			return -errno;
 	}
@@ -156,7 +143,7 @@ static int sgfs_mknod(const char *path, mode_t mode, dev_t rdev) {
 	int res = get_best_under(path, mode);
 	if(res < 0)
 		return res;
-	res = mknod(path + 1, mode, rdev);
+	res = mknodat(under_fd[res], path + 1, mode, rdev);
 	return res ? -errno : 0;
 }
 
@@ -165,7 +152,7 @@ static int sgfs_mkdir(const char *path, mode_t mode) {
 	int res = get_best_under(path, mode);
 	if(res < 0)
 		return res;
-	res = mkdir(path + 1, mode);
+	res = mkdirat(under_fd[res], path + 1, mode);
 	return res ? -errno : 0;
 }
 
@@ -174,7 +161,7 @@ static int sgfs_symlink(const char *path, const char *to) {
 	int res = get_best_under(path, 0);
 	if(res < 0)
 		return res;
-	res = symlink(path, to);
+	res = symlinkat(path, under_fd[res], to);
 	return res ? -errno : 0;
 }
 
@@ -183,20 +170,15 @@ static int sgfs_link(const char *path, const char *to) {
 	int res = get_best_under(path, 0);
 	if(res < 0)
 		return res;
-	res = link(path, to);
+	res = linkat(under_fd[res], path, under_fd[res], to, 0);
 	return res ? -errno : 0;
 }
 
-static int sgfs_access(const char *path, int mask) {
-	fprintf(stderr, "access(%s, %d)\n", path, mask);
+static int sgfs_access(const char *path, int mode) {
+	fprintf(stderr, "access(%s, %d)\n", path, mode);
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = access(path[1] ? path + 1 : ".", mask);
+		int res = faccessat(under_fd[i], path[1] ? path + 1 : ".", mode, AT_SYMLINK_NOFOLLOW);
 		if(!res)
 			return 0;
 		if(errno != ENOENT)
@@ -210,12 +192,7 @@ static int sgfs_readlink(const char *path, char *buf, size_t size) {
 	fprintf(stderr, "readlink(%s, %p, %zd)\n", path, buf, size);
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = readlink(path[1] ? path + 1 : ".", buf, size - 1);
+		int res = readlinkat(under_fd[i], path[1] ? path + 1 : ".", buf, size - 1);
 		if(res < 0) {
 			if(errno != ENOENT)
 				return -errno;
@@ -236,12 +213,7 @@ static int sgfs_unlink(const char *path) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = unlink(path + 1);
+		int res = unlinkat(under_fd[i], path + 1, 0);
 		if(res && errno == ENOENT)
 			continue;
 		return res ? -errno : 0;
@@ -259,12 +231,7 @@ static int sgfs_rmdir(const char *path) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = rmdir(path + 1);
+		int res = unlinkat(under_fd[i], path + 1, AT_REMOVEDIR);
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
@@ -284,12 +251,7 @@ static int sgfs_rename(const char *path, const char *to) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = rename(path + 1, to + 1);
+		int res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
@@ -309,12 +271,7 @@ static int sgfs_chmod(const char *path, mode_t mode) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = chmod(path + 1, mode);
+		int res = fchmodat(under_fd[i], path + 1, mode, AT_SYMLINK_NOFOLLOW);
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
@@ -334,12 +291,7 @@ static int sgfs_chown(const char *path, uid_t uid, gid_t gid) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		int res = chown(path + 1, uid, gid);
+		int res = fchownat(under_fd[i], path + 1, uid, gid, AT_SYMLINK_NOFOLLOW);
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
@@ -359,11 +311,6 @@ static int sgfs_utimens(const char *path, const struct timespec ts[2]) {
 		return -EIO;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
 		int res = utimensat(under_fd[i], path + 1, ts, AT_SYMLINK_NOFOLLOW);
 		if(res && errno == ENOENT)
 			continue;
@@ -384,12 +331,7 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 	errno = ENOENT;
 
 	for(i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-		res = open(path[1] ? path + 1 : ".", O_RDONLY);
+		res = openat(under_fd[i], path[1] ? path + 1 : ".", O_RDONLY);
 		if(res >= 0 || errno != ENOENT)
 			break;
 	}
@@ -428,9 +370,7 @@ static int sgfs_write(const char *path, const char *buf, size_t size, off_t offs
 	struct sgfs_file *f = fi->fh;
 	fprintf(stderr, "write(%s %d %d/%d, %p, %zd, %zd) = ", path, f->rfd, f->wfd, f->under, buf, size, (size_t)offset);
 	if(f->wfd < 0) {
-		if(fchdir(under_fd[f->under]))
-			return -EIO;
-		f->wfd = open(path[1] ? path + 1 : ".", O_WRONLY);
+		f->wfd = openat(under_fd[f->under], path[1] ? path + 1 : ".", O_WRONLY);
 		fprintf(stderr, "open(%s, O_WRONLY) = %d\n", path[1] ? path + 1 : ".", f->wfd);
 		if(f->wfd < 0)
 			return -errno;
@@ -455,12 +395,7 @@ static int sgfs_getattr(const char *path, struct stat *stbuf) {
 	errno = ENOENT;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
-
-        	res = lstat(path[1] ? path + 1 : ".", stbuf);
+        	res = fstatat(under_fd[i], path[1] ? path + 1 : ".", stbuf, AT_SYMLINK_NOFOLLOW);
 		if(!res || errno != ENOENT)
 			break;
 	}
