@@ -108,7 +108,7 @@ static int get_best_under(const char *path, int mode) {
 	char basename[strlen(path)];
 	int u = -1;
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	strcpy(basename, path + 1);
@@ -214,7 +214,7 @@ static int sgfs_mkdir(const char *path, mode_t mode) {
 static int sgfs_symlink(const char *from, const char *to) {
 	fprintf(stderr, "symlink(%s, %s)\n", from, to);
 
-	if(!*to)
+	if(!to[1])
 		return -EINVAL;
 
 	int res = get_best_under(to + 1, 0);
@@ -227,7 +227,7 @@ static int sgfs_symlink(const char *from, const char *to) {
 static int sgfs_link(const char *from, const char *to) {
 	fprintf(stderr, "link(%s, %s)\n", from, to);
 
-	if(!*from || !*to)
+	if(!from[1] || !to[1])
 		return -EINVAL;
 
 	// TODO: when linking to a directory that does not exist on the underlay
@@ -279,7 +279,7 @@ static int sgfs_readlink(const char *path, char *buf, size_t size) {
 static int sgfs_unlink(const char *path) {
 	fprintf(stderr, "unlink(%s)\n", path);
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
@@ -297,7 +297,7 @@ static int sgfs_rmdir(const char *path) {
 
 	bool found = false;
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
@@ -342,7 +342,7 @@ static int sgfs_rename(const char *path, const char *to) {
 
 	bool found = false;
 
-	if(!*path || !*to)
+	if(!path[1] || !to[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
@@ -362,7 +362,7 @@ static int sgfs_chmod(const char *path, mode_t mode) {
 
 	bool found = false;
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
@@ -382,7 +382,7 @@ static int sgfs_chown(const char *path, uid_t uid, gid_t gid) {
 
 	bool found = false;
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
@@ -402,7 +402,7 @@ static int sgfs_utimens(const char *path, const struct timespec ts[2]) {
 
 	bool found = false;
 
-	if(!*path)
+	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
