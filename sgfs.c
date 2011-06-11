@@ -296,6 +296,31 @@ static int sgfs_rmdir(const char *path) {
 	return found ? 0 : -ENOENT;
 }
 
+static int sgfs_truncate(const char *path, off_t size) {
+	fprintf(stderr, "truncate(%s, %ld)\n", path, (long)size);
+
+	bool found = false;
+
+	if(!path[1])
+		return -EINVAL;
+
+	for(int i = 0; i < unders; i++) {
+		if(fchdir(under_fd[i])) {
+			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
+			continue;
+		}
+
+		int res = truncate(path + 1, size);
+		if(res && errno == ENOENT)
+			continue;
+		if(res)
+			return -errno;
+		found = true;
+	}
+
+	return found ? 0 : -ENOENT;
+}
+
 static int sgfs_rename(const char *path, const char *to) {
 	fprintf(stderr, "rename(%s, %s)\n", path, to);
 
@@ -551,6 +576,7 @@ static struct fuse_operations sgfs_oper = {
 	.mkdir = sgfs_mkdir,
 	.unlink = sgfs_unlink,
 	.rmdir = sgfs_rmdir,
+	.truncate = sgfs_truncate,
 	.rename = sgfs_rename,
 	.chmod = sgfs_chmod,
 	.chown = sgfs_chown,
