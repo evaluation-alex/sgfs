@@ -156,22 +156,37 @@ static int sgfs_mkdir(const char *path, mode_t mode) {
 	return res ? -errno : 0;
 }
 
-static int sgfs_symlink(const char *path, const char *to) {
-	fprintf(stderr, "symlink(%s, %s)\n", path, to);
-	int res = get_best_under(path, 0);
+static int sgfs_symlink(const char *from, const char *to) {
+	fprintf(stderr, "symlink(%s, %s)\n", from, to);
+
+	if(!*to)
+		return -EINVAL;
+
+	int res = get_best_under(to + 1, 0);
 	if(res < 0)
 		return res;
-	res = symlinkat(path, under_fd[res], to);
+	res = symlinkat(from, under_fd[res], to + 1);
 	return res ? -errno : 0;
 }
 
-static int sgfs_link(const char *path, const char *to) {
-	fprintf(stderr, "link(%s, %s)\n", path, to);
-	int res = get_best_under(path, 0);
-	if(res < 0)
-		return res;
-	res = linkat(under_fd[res], path, under_fd[res], to, 0);
-	return res ? -errno : 0;
+static int sgfs_link(const char *from, const char *to) {
+	fprintf(stderr, "link(%s, %s)\n", from, to);
+
+	if(!*from || !*to)
+		return -EINVAL;
+
+	// TODO: when linking to a directory that does not exist on the underlay
+	// of the original file, we need to create that tree.
+
+	for(int i = 0; i < unders; i++) {
+		int res = linkat(under_fd[i], from + 1, under_fd[i], to + 1, 0);
+		if(!res)
+			return 0;
+		if(errno != ENOENT)
+			return -errno;
+	}
+
+	return -ENOENT;
 }
 
 static int sgfs_access(const char *path, int mode) {
