@@ -106,7 +106,7 @@ static int get_best_under(const char *path, int mode) {
 	bool hasdir[unders];
 	uint64_t ffree[unders];
 	char basename[strlen(path)];
-	mode_t dirmode = 0;
+	int u = -1;
 
 	if(!*path)
 		return -EINVAL;
@@ -139,8 +139,8 @@ static int get_best_under(const char *path, int mode) {
 		int res = fstatat(under_fd[i], basename, &stdir, AT_SYMLINK_NOFOLLOW);
 		if(!res && S_ISDIR(stdir.st_mode)) {
 			hasdir[i] = true;
-			if(!dirmode)
-				dirmode = stdir.st_mode;
+			if(u < 0)
+				u = i;
 		}
 
 		fprintf(stderr, "%d %s %d %ld\n", i, under_name[i], hasdir[i], (long)ffree[i]);
@@ -166,12 +166,28 @@ static int get_best_under(const char *path, int mode) {
 		}
 	}
 
+	// If the selected underlay does not have the desired directory,
+	// we have to create it and possibly all its parents.
+
 	if(!hasdir[j]) {
-		if(!dirmode)
-			dirmode = S_IRWXU;
-		int res = mkdirat(under_fd[j], basename, mode);
-		if(res)
-			return -errno;
+		if(u < 0)
+			return -EIO; // At least one underlay should have the directory we want to make!
+
+		char *split = basename;
+
+		do {
+			split = strchr(split, '/');
+			if(split)
+				*split = 0;
+			int res = fstatat(under_fd[u], basename, &stdir, AT_SYMLINK_NOFOLLOW);
+			if(res || !S_ISDIR(stdir.st_mode))
+				return -EIO;
+			res = mkdirat(under_fd[j], basename, stdir.st_mode);
+			if(res && errno != EEXIST)
+				return -errno;
+			if(split)
+				*split++ = '/';
+		} while(split);
 	}
 
 	return j;
