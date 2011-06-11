@@ -225,7 +225,7 @@ static int sgfs_unlink(const char *path) {
 	fprintf(stderr, "unlink(%s)\n", path);
 
 	if(!*path)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = unlinkat(under_fd[i], path + 1, 0);
@@ -243,7 +243,7 @@ static int sgfs_rmdir(const char *path) {
 	bool found = false;
 
 	if(!*path)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = unlinkat(under_fd[i], path + 1, AT_REMOVEDIR);
@@ -263,7 +263,7 @@ static int sgfs_rename(const char *path, const char *to) {
 	bool found = false;
 
 	if(!*path || !*to)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
@@ -283,7 +283,7 @@ static int sgfs_chmod(const char *path, mode_t mode) {
 	bool found = false;
 
 	if(!*path)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = fchmodat(under_fd[i], path + 1, mode, AT_SYMLINK_NOFOLLOW);
@@ -303,7 +303,7 @@ static int sgfs_chown(const char *path, uid_t uid, gid_t gid) {
 	bool found = false;
 
 	if(!*path)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = fchownat(under_fd[i], path + 1, uid, gid, AT_SYMLINK_NOFOLLOW);
@@ -323,7 +323,7 @@ static int sgfs_utimens(const char *path, const struct timespec ts[2]) {
 	bool found = false;
 
 	if(!*path)
-		return -EIO;
+		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
 		int res = utimensat(under_fd[i], path + 1, ts, AT_SYMLINK_NOFOLLOW);
