@@ -217,7 +217,7 @@ static int sgfs_symlink(const char *from, const char *to) {
 	if(!to[1])
 		return -EINVAL;
 
-	int res = get_best_under(to + 1, 0);
+	int res = get_best_under(to, 0);
 	if(res < 0)
 		return res;
 	res = symlinkat(from, under_fd[res], to + 1);
