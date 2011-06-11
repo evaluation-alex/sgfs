@@ -366,7 +366,7 @@ static int sgfs_chmod(const char *path, mode_t mode) {
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
-		int res = fchmodat(under_fd[i], path + 1, mode, AT_SYMLINK_NOFOLLOW);
+		int res = fchmodat(under_fd[i], path + 1, mode, 0); // Should have AT_SYMLINK_NOFOLLOW but is not implemented?
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
