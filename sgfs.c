@@ -70,17 +70,13 @@ static uint32_t crc(const char *buf, int len) {
 }
 
 static int sgfs_statfs(const char *path, struct statvfs *stbuf) {
-	fprintf(stderr, "statfs(%s)\n", path);
-
 	struct statvfs st;
 
 	memset(stbuf, 0, sizeof stbuf);
 
 	for(int i = 0; i < unders; i++) {
-		if(fstatvfs(under_fd[i], &st)) {
-			fprintf(stderr, "fstatvfs(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
+		if(fstatvfs(under_fd[i], &st))
+			return -EIO;
 
 		stbuf->f_bsize += st.f_bsize;
 		stbuf->f_frsize += st.f_frsize;
@@ -129,10 +125,8 @@ static int get_best_under(const char *path, int mode) {
 	struct stat stdir;
 
 	for(int i = 0; i < unders; i++) {
-		if(fstatvfs(under_fd[i], &st)) {
-			fprintf(stderr, "fstatvfs(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
+		if(fstatvfs(under_fd[i], &st))
+			return -EIO;
 
 		ffree[i] = (uint64_t)st.f_bsize * st.f_bfree;
 
@@ -142,8 +136,6 @@ static int get_best_under(const char *path, int mode) {
 			if(u < 0)
 				u = i;
 		}
-
-		fprintf(stderr, "%d %s %d %ld\n", i, under_name[i], hasdir[i], (long)ffree[i]);
 	}
 
 	for(int i = 0; i < unders; i++) {
@@ -194,7 +186,6 @@ static int get_best_under(const char *path, int mode) {
 }
 
 static int sgfs_mknod(const char *path, mode_t mode, dev_t rdev) {
-	fprintf(stderr, "mknod(%s, %d, %d)\n", path, (int)mode, (int)rdev);
 	int res = get_best_under(path, mode);
 	if(res < 0)
 		return res;
@@ -203,7 +194,6 @@ static int sgfs_mknod(const char *path, mode_t mode, dev_t rdev) {
 }
 
 static int sgfs_mkdir(const char *path, mode_t mode) {
-	fprintf(stderr, "mkdir(%s, %d)n", path, (int)mode);
 	int res = get_best_under(path, mode);
 	if(res < 0)
 		return res;
@@ -212,8 +202,6 @@ static int sgfs_mkdir(const char *path, mode_t mode) {
 }
 
 static int sgfs_symlink(const char *from, const char *to) {
-	fprintf(stderr, "symlink(%s, %s)\n", from, to);
-
 	if(!to[1])
 		return -EINVAL;
 
@@ -225,8 +213,6 @@ static int sgfs_symlink(const char *from, const char *to) {
 }
 
 static int sgfs_link(const char *from, const char *to) {
-	fprintf(stderr, "link(%s, %s)\n", from, to);
-
 	if(!from[1] || !to[1])
 		return -EINVAL;
 
@@ -245,8 +231,6 @@ static int sgfs_link(const char *from, const char *to) {
 }
 
 static int sgfs_access(const char *path, int mode) {
-	fprintf(stderr, "access(%s, %d)\n", path, mode);
-
 	for(int i = 0; i < unders; i++) {
 		int res = faccessat(under_fd[i], path[1] ? path + 1 : ".", mode, AT_SYMLINK_NOFOLLOW);
 		if(!res)
@@ -259,8 +243,6 @@ static int sgfs_access(const char *path, int mode) {
 }
 
 static int sgfs_readlink(const char *path, char *buf, size_t size) {
-	fprintf(stderr, "readlink(%s, %p, %zd)\n", path, buf, size);
-
 	for(int i = 0; i < unders; i++) {
 		int res = readlinkat(under_fd[i], path[1] ? path + 1 : ".", buf, size - 1);
 		if(res < 0) {
@@ -277,8 +259,6 @@ static int sgfs_readlink(const char *path, char *buf, size_t size) {
 }
 
 static int sgfs_unlink(const char *path) {
-	fprintf(stderr, "unlink(%s)\n", path);
-
 	if(!path[1])
 		return -EINVAL;
 
@@ -293,8 +273,6 @@ static int sgfs_unlink(const char *path) {
 }
 
 static int sgfs_rmdir(const char *path) {
-	fprintf(stderr, "rmdir(%s)\n", path);
-
 	bool found = false;
 
 	if(!path[1])
@@ -313,18 +291,14 @@ static int sgfs_rmdir(const char *path) {
 }
 
 static int sgfs_truncate(const char *path, off_t size) {
-	fprintf(stderr, "truncate(%s, %ld)\n", path, (long)size);
-
 	bool found = false;
 
 	if(!path[1])
 		return -EINVAL;
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
+		if(fchdir(under_fd[i]))
+			return -EIO;
 
 		int res = truncate(path + 1, size);
 		if(res && errno == ENOENT)
@@ -338,8 +312,6 @@ static int sgfs_truncate(const char *path, off_t size) {
 }
 
 static int sgfs_rename(const char *path, const char *to) {
-	fprintf(stderr, "rename(%s, %s)\n", path, to);
-
 	bool found = false;
 
 	if(!path[1] || !to[1])
@@ -358,8 +330,6 @@ static int sgfs_rename(const char *path, const char *to) {
 }
 
 static int sgfs_chmod(const char *path, mode_t mode) {
-	fprintf(stderr, "chmod(%s, %d)\n", path, (int)mode);
-
 	bool found = false;
 
 	if(!path[1])
@@ -378,8 +348,6 @@ static int sgfs_chmod(const char *path, mode_t mode) {
 }
 
 static int sgfs_chown(const char *path, uid_t uid, gid_t gid) {
-	fprintf(stderr, "chown(%s, %d, %d)\n", path, (int)uid, (int)gid);
-
 	bool found = false;
 
 	if(!path[1])
@@ -398,8 +366,6 @@ static int sgfs_chown(const char *path, uid_t uid, gid_t gid) {
 }
 
 static int sgfs_utimens(const char *path, const struct timespec ts[2]) {
-	fprintf(stderr, "utimens(%s)\n", path);
-
 	bool found = false;
 
 	if(!path[1])
@@ -419,8 +385,6 @@ static int sgfs_utimens(const char *path, const struct timespec ts[2]) {
 
 
 static int sgfs_open(const char *path, struct fuse_file_info *fi) {
-	fprintf(stderr, "open(%s)\n", path);
-
 	int i;
 	int res = -1;
 	errno = ENOENT;
@@ -430,8 +394,6 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 		if(res >= 0 || errno != ENOENT)
 			break;
 	}
-
-	fprintf(stderr, "%d %s\n", res, strerror(errno));
 
 	if(res >= 0) {
 		struct sgfs_file *f = malloc(sizeof *f);
@@ -447,32 +409,25 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 
 static int sgfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
 	struct sgfs_file *f = fi->fh;
-	fprintf(stderr, "read(%s %d, %p, %zd, %zd) = ", path, f->rfd, buf, size, (size_t)offset);
 	int res = pread(f->rfd, buf, size, offset);
-	fprintf(stderr, "%d (%s)\n", res, strerror(errno));
 	return res < 0 ? -errno : res;
 }
 
 static int sgfs_fsync(const char *path, int idatasync, struct fuse_file_info *fi) {
 	struct sgfs_file *f = fi->fh;
-	fprintf(stderr, "fsync(%s %d %d) = ", path, f->rfd, idatasync);
 	int res = idatasync ? fdatasync(f->rfd) : fsync(f->rfd);
-	fprintf(stderr, "%d (%s)\n", res, strerror(errno));
 	return res < 0 ? -errno : res;
 }
 
 static int sgfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
 	struct sgfs_file *f = fi->fh;
-	fprintf(stderr, "write(%s %d %d/%d, %p, %zd, %zd) = ", path, f->rfd, f->wfd, f->under, buf, size, (size_t)offset);
 	if(f->wfd < 0) {
 		f->wfd = openat(under_fd[f->under], path[1] ? path + 1 : ".", O_WRONLY);
-		fprintf(stderr, "open(%s, O_WRONLY) = %d\n", path[1] ? path + 1 : ".", f->wfd);
 		if(f->wfd < 0)
 			return -errno;
 	}
 
 	int res = pwrite(f->wfd, buf, size, offset);
-	fprintf(stderr, "%d (%s)\n", res, strerror(errno));
 	return res < 0 ? -errno : res;
 }
 
@@ -484,8 +439,6 @@ static int sgfs_release(const char *path, struct fuse_file_info *fi) {
 }
 
 static int sgfs_getattr(const char *path, struct stat *stbuf) {
-	fprintf(stderr, "getattr(%s)\n", path);
-
 	int res = -1;
 	errno = ENOENT;
 
@@ -495,7 +448,6 @@ static int sgfs_getattr(const char *path, struct stat *stbuf) {
 			break;
 	}
 
-	fprintf(stderr, "res = %d\n", res);
 	return res ? -errno : 0;
 }
 
@@ -504,8 +456,6 @@ static int sgfs_opendir(const char *path, struct fuse_file_info *fi) {
 }
 
 static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
-	fprintf(stderr, "readdir(%s, %ld)\n", path, (long)offset);
-
 	bool found = 0;
 
 	if(offset) {
@@ -516,14 +466,10 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 	char hbm[8192] = ""; // 64k entry hash bitmap for duplicate detection
 
 	for(int i = 0; i < unders; i++) {
-		if(fchdir(under_fd[i])) {
-			fprintf(stderr, "fchdir(%s) failed: %s\n", under_name[i], strerror(errno));
-			continue;
-		}
+		if(fchdir(under_fd[i]))
+			return -EIO;
 
 		DIR *dir = opendir(path[1] ? path + 1 : ".");
-		if(!dir)
-			fprintf(stderr, "opendir(%s) failed: %s\n", path + 1, strerror(errno));
 
 		if(!dir && errno == ENOENT)
 			continue;
@@ -536,15 +482,15 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 		struct dirent *ent;
 
 		while((ent = readdir(dir))) {
-			fprintf(stderr, "%s\n", ent->d_name);
-
 			// Do duplicate detection for directories
 			if(ent->d_type == DT_UNKNOWN || ent->d_type == DT_DIR) {
 				uint16_t hash = crc(ent->d_name, strlen(ent->d_name));
 				uint8_t mask = 1 << (hash & 0x7);
 				hash >>= 3;
+
 				if(hbm[hash] & mask) {
 					bool found = false;
+
 					for(int j = 0; j < i; j++) {
 						char entpath[PATH_MAX];
 						strncpy(entpath, path[1] ? path + 1 : ".", sizeof entpath - 1);
@@ -556,10 +502,9 @@ static int sgfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
 							break;
 						}
 					}
-					if(found) {
-						fprintf(stderr, "Found duplicate %s in %s\n", ent->d_name, path);
+
+					if(found)
 						continue;
-					}
 				} else {
 					hbm[hash] |= mask;
 				}
@@ -652,8 +597,6 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Invalid arguments\n");
 		return 1;
 	}
-
-	fprintf(stderr, "mountpoint = %s, unders = %d\n", mountpoint, unders);
 
 	for(int i = 0; i < unders; i++) {
 		under_fd[i] = open(under_name[i], O_RDONLY | O_DIRECTORY);
