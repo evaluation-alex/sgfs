@@ -98,6 +98,64 @@ static int sgfs_statfs(const char *path, struct statvfs *stbuf) {
 	return 0;
 }
 
+static int fix_tree(int uf, const char *path, int ut) {
+	// Find under with destination path if necessary
+
+	char basename[strlen(path)];
+
+	strcpy(basename, path + 1);
+	char *slash = strrchr(basename, '/');
+	if(!slash)
+		return 0; // Bail out early, every underlay has the root dir!
+	else
+		*slash = 0;
+
+	struct stat stdir;
+
+	if(uf < 0) {
+		// First, check if target already has the full directory tree
+
+		int res = fstatat(under_fd[ut], basename, &stdir, AT_SYMLINK_NOFOLLOW);
+		if(!res && S_ISDIR(stdir.st_mode))
+			return 0;
+
+		// Check all other unders
+
+		for(int i = 0; i < unders; i++) {
+			if(i == ut)
+				continue;
+
+			res = fstatat(under_fd[i], basename, &stdir, AT_SYMLINK_NOFOLLOW);
+			if(!res && S_ISDIR(stdir.st_mode)) {
+				uf = i;
+				break;
+			}
+		}
+		if(uf < 0)
+			return -ENOENT;
+	}
+
+	// Copy directory tree
+
+	char *split = basename;
+
+	do {
+		split = strchr(split, '/');
+		if(split)
+			*split = 0;
+		int res = fstatat(under_fd[uf], basename, &stdir, AT_SYMLINK_NOFOLLOW);
+		if(res || !S_ISDIR(stdir.st_mode))
+			return -EIO;
+		res = mkdirat(under_fd[ut], basename, stdir.st_mode);
+		if(res && errno != EEXIST)
+			return -errno;
+		if(split)
+			*split++ = '/';
+	} while(split);
+
+	return 0;
+}
+
 static int get_best_under(const char *path, int mode) {
 	bool hasdir[unders];
 	uint64_t ffree[unders];
@@ -328,21 +386,61 @@ static int sgfs_truncate(const char *path, off_t size) {
 }
 
 static int sgfs_rename(const char *path, const char *to) {
-	bool found = false;
-
 	if(!path[1] || !to[1])
 		return -EINVAL;
 
+	// Find file/directory to rename
+
+	struct stat st;
+	int uf = -1;
+
 	for(int i = 0; i < unders; i++) {
-		int res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
+		int res = fstatat(under_fd[i], path + 1, &st, AT_SYMLINK_NOFOLLOW);
 		if(res && errno == ENOENT)
 			continue;
 		if(res)
 			return -errno;
-		found = true;
+		uf = i;
+		break;
 	}
 
-	return found ? 0 : -ENOENT;
+	if(uf < 0)
+		return -ENOENT;
+
+	if(S_ISDIR(st.st_mode)) {
+		// Move directory in all unders
+		char buf[100];
+		gets(buf);
+		for(int i = 0; i < unders; i++) {
+			//if(i != uf) {
+			{	
+				int res = fstatat(under_fd[i], path + 1, &st, AT_SYMLINK_NOFOLLOW);
+				if(res && errno == ENOENT)
+					continue;
+				if(res)
+					return -errno;
+				// Check that it is also a directory on the other unders
+				if(!S_ISDIR(st.st_mode))
+					return -EIO;
+				if(fix_tree(-1, to, i))
+					return -errno;
+			}
+
+			int res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
+			if(res)
+				return -errno;
+		}
+		gets(buf);
+	} else {
+		// Move file in its own under
+		if(fix_tree(-1, to, uf))
+			return -errno;
+		int res = renameat(under_fd[uf], path + 1, under_fd[uf], to + 1);
+		if(res)
+			return -errno;
+	}
+
+	return 0;
 }
 
 static int sgfs_chmod(const char *path, mode_t mode) {
