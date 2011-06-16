@@ -409,29 +409,32 @@ static int sgfs_rename(const char *path, const char *to) {
 
 	if(S_ISDIR(st.st_mode)) {
 		// Move directory in all unders
-		char buf[100];
-		gets(buf);
 		for(int i = 0; i < unders; i++) {
-			//if(i != uf) {
-			{	
-				int res = fstatat(under_fd[i], path + 1, &st, AT_SYMLINK_NOFOLLOW);
-				if(res && errno == ENOENT)
-					continue;
-				if(res)
-					return -errno;
-				// Check that it is also a directory on the other unders
-				if(!S_ISDIR(st.st_mode))
-					return -EIO;
-				if(fix_tree(-1, to, i))
-					return -errno;
-			}
+			int res = fstatat(under_fd[i], path + 1, &st, AT_SYMLINK_NOFOLLOW);
+			if(res && errno == ENOENT)
+				continue;
+			if(res)
+				return -errno;
+			// Check that it is also a directory on the other unders
+			if(!S_ISDIR(st.st_mode))
+				return -EIO;
+			if(fix_tree(-1, to, i))
+				return -errno;
 
-			int res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
+			res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
 			if(res)
 				return -errno;
 		}
-		gets(buf);
 	} else {
+		// Check whether the destination file exists in another under, and remove if so
+		for(int i = 0; i < unders; i++) {
+			if(i == uf)
+				continue;
+			if(!faccessat(under_fd[i], to + 1, F_OK, AT_SYMLINK_NOFOLLOW))
+				if(unlinkat(under_fd[i], to + 1, 0))
+					return -errno;
+		}
+
 		// Move file in its own under
 		if(fix_tree(-1, to, uf))
 			return -errno;
