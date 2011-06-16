@@ -296,11 +296,22 @@ static int sgfs_link(const char *from, const char *to) {
 	if(!from[1] || !to[1])
 		return -EINVAL;
 
+	// First check whether the destination file already exists in any of the underlays
+	for(int i = 0; i < unders; i++) {
+		if(!faccessat(under_fd[i], to + 1, F_OK, AT_SYMLINK_NOFOLLOW))
+			return -EEXIST;
+	}
+
 	// TODO: when linking to a directory that does not exist on the underlay
 	// of the original file, we need to create that tree.
 
 	for(int i = 0; i < unders; i++) {
-		int res = linkat(under_fd[i], from + 1, under_fd[i], to + 1, 0);
+		if(faccessat(under_fd[i], from + 1, F_OK, AT_SYMLINK_NOFOLLOW))
+			continue;
+		int res = fix_tree(-1, to, i);
+		if(res)
+			return res;
+		res = linkat(under_fd[i], from + 1, under_fd[i], to + 1, 0);
 		if(!res)
 			return 0;
 		if(errno != ENOENT)
