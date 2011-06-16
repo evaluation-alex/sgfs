@@ -435,8 +435,9 @@ static int sgfs_rename(const char *path, const char *to) {
 			// Check that it is also a directory on the other unders
 			if(!S_ISDIR(st.st_mode))
 				return -EIO;
-			if(fix_tree(-1, to, i))
-				return -errno;
+			res = fix_tree(-1, to, i);
+			if(res)
+				return res;
 
 			res = renameat(under_fd[i], path + 1, under_fd[i], to + 1);
 			if(res)
@@ -444,9 +445,10 @@ static int sgfs_rename(const char *path, const char *to) {
 		}
 	} else {
 		// Move file in its own under
-		if(fix_tree(-1, to, uf))
-			return -errno;
-		int res = renameat(under_fd[uf], path + 1, under_fd[uf], to + 1);
+		int res = fix_tree(-1, to, uf);
+		if(res)
+			return res;
+		res = renameat(under_fd[uf], path + 1, under_fd[uf], to + 1);
 		if(res)
 			return -errno;
 
