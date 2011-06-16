@@ -279,6 +279,12 @@ static int sgfs_symlink(const char *from, const char *to) {
 	if(!to[1])
 		return -EINVAL;
 
+	// First check whether the destination file already exists in any of the underlays
+	for(int i = 0; i < unders; i++) {
+		if(!faccessat(under_fd[i], to + 1, F_OK, AT_SYMLINK_NOFOLLOW))
+			return -EEXIST;
+	}
+
 	int res = get_best_under(to, 0);
 	if(res < 0)
 		return res;
