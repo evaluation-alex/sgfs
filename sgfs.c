@@ -426,6 +426,13 @@ static int sgfs_rename(const char *path, const char *to) {
 				return -errno;
 		}
 	} else {
+		// Move file in its own under
+		if(fix_tree(-1, to, uf))
+			return -errno;
+		int res = renameat(under_fd[uf], path + 1, under_fd[uf], to + 1);
+		if(res)
+			return -errno;
+
 		// Check whether the destination file exists in another under, and remove if so
 		for(int i = 0; i < unders; i++) {
 			if(i == uf)
@@ -434,13 +441,6 @@ static int sgfs_rename(const char *path, const char *to) {
 				if(unlinkat(under_fd[i], to + 1, 0))
 					return -errno;
 		}
-
-		// Move file in its own under
-		if(fix_tree(-1, to, uf))
-			return -errno;
-		int res = renameat(under_fd[uf], path + 1, under_fd[uf], to + 1);
-		if(res)
-			return -errno;
 	}
 
 	return 0;
