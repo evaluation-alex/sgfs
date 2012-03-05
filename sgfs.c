@@ -530,7 +530,7 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 		f->under = creatunder;
 		f->rfd = creatfd;
 		f->wfd = creatfd;
-		fi->fh = f;
+		fi->fh = (intptr_t)f;
 		creatfd = -1;
 		return 0;
 	} else if(creatfd >= 0) {
@@ -549,7 +549,7 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 		f->under = i;
 		f->rfd = res;
 		f->wfd = -1;
-		fi->fh = f;
+		fi->fh = (intptr_t)f;
 		return 0;
 	} else {
 		return -errno;
@@ -557,19 +557,19 @@ static int sgfs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 static int sgfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-	struct sgfs_file *f = fi->fh;
+	struct sgfs_file *f = (struct sgfs_file *)fi->fh;
 	int res = pread(f->rfd, buf, size, offset);
 	return res < 0 ? -errno : res;
 }
 
 static int sgfs_fsync(const char *path, int idatasync, struct fuse_file_info *fi) {
-	struct sgfs_file *f = fi->fh;
+	struct sgfs_file *f = (struct sgfs_file *)fi->fh;
 	int res = idatasync ? fdatasync(f->rfd) : fsync(f->rfd);
 	return res < 0 ? -errno : res;
 }
 
 static int sgfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-	struct sgfs_file *f = fi->fh;
+	struct sgfs_file *f = (struct sgfs_file *)fi->fh;
 	if(f->wfd < 0) {
 		f->wfd = openat(under_fd[f->under], path[1] ? path + 1 : ".", O_WRONLY);
 		if(f->wfd < 0)
@@ -581,7 +581,7 @@ static int sgfs_write(const char *path, const char *buf, size_t size, off_t offs
 }
 
 static int sgfs_release(const char *path, struct fuse_file_info *fi) {
-	struct sgfs_file *f = fi->fh;
+	struct sgfs_file *f = (struct sgfs_file *)fi->fh;
 	if(f->wfd && f->wfd != f->rfd)
 		close(f->wfd);
 	return close(f->rfd);
