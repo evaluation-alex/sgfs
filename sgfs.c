@@ -71,29 +71,39 @@ static uint32_t crc(const char *buf, int len) {
 
 static int sgfs_statfs(const char *path, struct statvfs *stbuf) {
 	struct statvfs st;
+	uint64_t total = 0;
+	uint64_t free = 0;
+	uint64_t avail = 0;
 
 	memset(stbuf, 0, sizeof stbuf);
+	stbuf->f_flag = ~0UL;
 
 	for(int i = 0; i < unders; i++) {
 		if(fstatvfs(under_fd[i], &st))
 			return -EIO;
 
-		stbuf->f_bsize += st.f_bsize;
-		stbuf->f_frsize += st.f_frsize;
-		stbuf->f_blocks += st.f_blocks;
-		stbuf->f_bfree += st.f_bfree;
-		stbuf->f_bavail += st.f_bavail;
+		if(stbuf->f_bsize < st.f_bsize)
+			stbuf->f_bsize = st.f_bsize;
+		if(stbuf->f_frsize < st.f_frsize)
+			stbuf->f_frsize = st.f_frsize;
+		if(!stbuf->f_namemax || stbuf->f_namemax > st.f_namemax)
+			stbuf->f_namemax = st.f_namemax;
+
+		total += st.f_blocks * st.f_frsize;
+		free += st.f_bfree * st.f_frsize;
+		avail += st.f_bavail * st.f_frsize;
+
 		stbuf->f_files += st.f_files;
 		stbuf->f_ffree += st.f_ffree;
 		stbuf->f_favail += st.f_favail;
-		//stbuf->f_fsid += st.f_fsid;
-		//stbuf->f_flag += st.f_flag;
-		stbuf->f_namemax += st.f_namemax;
+
+		stbuf->f_fsid ^= st.f_fsid;
+		stbuf->f_flag &= st.f_flag;
 	}
 
-	stbuf->f_bsize /= unders;
-	stbuf->f_frsize /= unders;
-	stbuf->f_namemax /= unders;
+	stbuf->f_blocks = total / stbuf->f_frsize;
+	stbuf->f_bfree = free / stbuf->f_frsize;
+	stbuf->f_bavail = avail / stbuf->f_frsize;
 
 	return 0;
 }
